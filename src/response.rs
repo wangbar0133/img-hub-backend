@@ -1,30 +1,20 @@
-use serde::{Serialize, Deserialize};
-
-use crate::albums::Album;
+use serde::Serialize;
+use crate::models::{Album, UploadTask};
 
 #[derive(Debug, Serialize)]
 #[serde(crate = "rocket::serde")]
-pub struct AlbumsRespones {
+pub struct AlbumsResponse {
     pub success: bool,
     pub msg: Option<String>,
-    pub albums: Vec<Album>
+    pub albums: Vec<Album>,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(crate = "rocket::serde")]
-pub struct AlbumRespones {
+pub struct AlbumResponse {
     pub success: bool,
     pub msg: Option<String>,
-    pub album: Option<Album>
-}
-
-#[derive(Debug, Serialize)]
-#[serde(crate = "rocket::serde")]
-pub struct UploadResponse {
-    pub success: bool,
-    pub msg: Option<String>,
-    pub uploaded_files: Vec<String>,
-    pub failed_files: Vec<String>,
+    pub album: Option<Album>,
 }
 
 #[derive(Debug, Serialize)]
@@ -39,28 +29,6 @@ pub struct SetCoverResponse {
 pub struct DeleteAlbumResponse {
     pub success: bool,
     pub msg: Option<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(crate = "rocket::serde")]
-pub enum UploadTaskStatus {
-    Processing,
-    Completed,
-    Failed,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(crate = "rocket::serde")]
-pub struct UploadTask {
-    pub task_id: String,
-    pub status: UploadTaskStatus,
-    pub total_files: usize,
-    pub processed_files: usize,
-    pub failed_files: usize,
-    pub album_id: Option<String>,
-    pub error_message: Option<String>,
-    pub created_at: chrono::DateTime<chrono::Utc>,
-    pub completed_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[derive(Debug, Serialize)]

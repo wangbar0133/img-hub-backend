@@ -27,7 +27,7 @@ Retrieves all photo albums from the database.
 ---
 
 ### 3. Get Featured Albums
-**GET** `/api/featured_albums`
+**GET** `/api/featured-albums`
 
 Retrieves only albums marked as featured (featured = true).
 
@@ -43,7 +43,7 @@ Retrieves only albums marked as featured (featured = true).
       "cover": "string",
       "category": "string",
       "shot_time": "2024-01-01T00:00:00Z",
-      "updata_time": "2024-01-01T00:00:00Z",
+      "update_time": "2024-01-01T00:00:00Z",
       "featured": false,
       "hidden": false,
       "photos": [
@@ -105,7 +105,7 @@ Retrieves a specific album by its ID.
     "cover": "string", 
     "category": "string",
     "shot_time": "2024-01-01T00:00:00Z",
-    "updata_time": "2024-01-01T00:00:00Z",
+    "update_time": "2024-01-01T00:00:00Z",
     "featured": false,
     "hidden": false,
     "photos": [...]
@@ -133,7 +133,6 @@ Uploads multiple images and creates compressed versions (thumbnail, detail, orig
 
 **Form Fields:**
 - `images` (file[], required): Unlimited number of image files
-- `id` (string, optional): Album ID (defaults to auto-generated UUID)
 - `title` (string, optional): Album title (defaults to "Untitled Album")
 - `category` (string, optional): Album category (defaults to "cosplay")
 - `featured` (string, optional): Whether album is featured ("true"/"false", defaults to "false")
@@ -153,15 +152,17 @@ Uploads multiple images and creates compressed versions (thumbnail, detail, orig
 {
   "success": false,
   "task_id": "upload-12345678-1234-1234-1234-123456789abc",
-  "msg": "Failed to parse upload data"
+  "msg": "Failed to parse upload data err: {error details}"
 }
 ```
 
 **Image Processing:**
-- **Source**: Original filename (src)
-- **Detail**: Compressed to max 1920x1080, 100% quality
-- **Medium**: Compressed to max 800x600, 100% quality
-- **Thumbnail**: Compressed to max 300x300, 100% quality
+- Each uploaded file is renamed to a UUID (original filename is discarded)
+- Files are stored under `{upload_dir}/{album_id}/` subdirectory
+- **Source**: `{album_id}/{uuid}.jpg`
+- **Detail**: `{album_id}/{uuid}_detail.jpg` (max 1920x1080, 95% quality)
+- **Medium**: `{album_id}/{uuid}_medium.jpg` (max 800x600, 85% quality)
+- **Thumbnail**: `{album_id}/{uuid}_thumbnail.jpg` (max 300x300, 75% quality)
 - All images maintain aspect ratio during compression
 - Processing happens in background, use `/api/upload-status/{task_id}` to track progress
 
@@ -228,7 +229,7 @@ Sets the cover image for a specific album.
 **Request Body:**
 ```json
 {
-  "cover": "image1_medium.jpg"
+  "cover": "album-id-123/a1b2c3d4_medium.jpg"
 }
 ```
 
@@ -236,7 +237,7 @@ Sets the cover image for a specific album.
 ```json
 {
   "success": true,
-  "msg": "Album cover updated to: image1_medium.jpg"
+  "msg": "Album cover updated to: album-id-123/a1b2c3d4_medium.jpg"
 }
 ```
 
@@ -276,36 +277,37 @@ Deletes a specific album and all its associated photos from the database and fil
 ```json
 {
   "success": false,
-  "msg": "Album not found"
+  "msg": "Album was not deleted from database"
 }
 ```
 
 **Error Cases:**
-- Album not found
+- Album not found in database
 - Database error
-- File system error during photo deletion
+- File system error during directory deletion
 
 **Note:** This operation permanently deletes:
 - Album record from database
-- All photo files (src, detail, medium, thumbnail) from file system
+- Entire album directory (`{upload_dir}/{album_id}/`) including all photo files
 - Cannot be undone
 
 ---
 
 ### 9. Static File Server
-**GET** `/public/{filename}`
+**GET** `/public/{album_id}/{filename}`
 
-Serves uploaded images and generated thumbnails.
+Serves uploaded images and generated thumbnails. Files are organized by album ID.
 
 **Parameters:**
-- `filename` (string, path): Image filename
+- `album_id` (string, path): Album ID
+- `filename` (string, path): Image filename (UUID-based)
 
 **Example:**
 ```
-GET /public/image1.jpg
-GET /public/image1_thumbnail.jpg
-GET /public/image1_detail.jpg
-GET /public/image1_medium.jpg
+GET /public/album-id-123/a1b2c3d4.jpg
+GET /public/album-id-123/a1b2c3d4_thumbnail.jpg
+GET /public/album-id-123/a1b2c3d4_detail.jpg
+GET /public/album-id-123/a1b2c3d4_medium.jpg
 ```
 
 ---
@@ -320,7 +322,7 @@ GET /public/image1_medium.jpg
   "cover": "string",
   "category": "string",
   "shot_time": "ISO 8601 datetime",
-  "updata_time": "ISO 8601 datetime",
+  "update_time": "ISO 8601 datetime",
   "featured": "boolean",
   "hidden": "boolean",
   "photos": "Photo[]"
@@ -405,6 +407,6 @@ All endpoints return JSON responses with the following structure:
 - **Max File Upload**: Unlimited (async processing)
 - **Supported Formats**: JPEG, PNG (determined by image crate)
 - **Database**: MongoDB on `localhost:27017` (configurable via DATABASE_URL env var)
-- **Database Name**: `img-hub`
+- **Database Name**: `img-hub` (configurable via DATABASE_NAME env var)
 - **Collections**: `albums`, `upload_tasks`
 - **Processing**: Async background processing with progress tracking

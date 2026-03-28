@@ -3,13 +3,10 @@ use log::{info, error};
 use std::path::Path;
 use std::fs::File;
 use std::io::BufWriter;
-extern crate exif;
 use exif::{Exif, Tag, In, Value};
 use chrono::{DateTime, Utc, NaiveDateTime};
 
-use serde::{Serialize, Deserialize};
-
-use crate::albums::Photo;
+use crate::models::{Photo, ImageInfo};
 
 #[derive(Debug, Clone)]
 pub struct CompressionConfig {
@@ -21,11 +18,11 @@ pub struct CompressionConfig {
 
 impl CompressionConfig {
 
-    fn detail() -> Self {
+    pub fn detail() -> Self {
         Self {
             max_width: 1920,
             max_height: 1080,
-            quality: 100,
+            quality: 95,
             format: ImageFormat::Jpeg,
         }
     }
@@ -34,7 +31,7 @@ impl CompressionConfig {
         Self {
             max_width: 800,
             max_height: 600,
-            quality: 100,
+            quality: 85,
             format: ImageFormat::Jpeg,
         }
     }
@@ -43,7 +40,7 @@ impl CompressionConfig {
         Self {
             max_width: 300,
             max_height: 300,
-            quality: 100,
+            quality: 75,
             format: ImageFormat::Jpeg,
         }
     }
@@ -96,11 +93,11 @@ impl ImageCompressor {
         let output_path = output_dir.as_ref();
         tokio::fs::create_dir_all(output_path).await?;
 
-        // 使用模式匹配处理 basename，截去图片扩展名
-        let clean_base_name = match base_name.to_lowercase().as_str() {
-            name if name.ends_with(".jpg") => &base_name[..base_name.len() - 4],
-            _ => base_name,
-        };
+        // 截去图片扩展名
+        let clean_base_name = Path::new(base_name)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(base_name);
 
         let input_path_buf = input_path.as_ref().to_path_buf();
         
@@ -218,44 +215,37 @@ impl ImageCompressor {
             let file_size = std::fs::metadata(&path_buf)?.len();
 
             // 提取 EXIF 数据
-            let exif_data = Self::extract_exif_data(&path_buf);
-            
+            let mut info = Self::extract_exif_data(&path_buf);
+
             // 快速获取图片尺寸，不完整解码
             let (width, height, format) = Self::get_image_dimensions_fast(&path_buf)?;
+            info.width = width;
+            info.height = height;
+            info.format = format;
+            info.file_size = file_size;
 
-            Ok(ImageInfo {
-                width,
-                height,
-                format,
-                file_size,
-                created_at: exif_data.created_at,
-                camera_make: exif_data.camera_make,
-                camera_model: exif_data.camera_model,
-                lens_model: exif_data.lens_model,
-                focal_length: exif_data.focal_length,
-                aperture: exif_data.aperture,
-                exposure_time: exif_data.exposure_time,
-                iso: exif_data.iso,
-                flash: exif_data.flash,
-                white_balance: exif_data.white_balance,
-            })
+            Ok(info)
         }).await.map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?
     }
 
-    /// 提取 EXIF 数据
-    fn extract_exif_data<P: AsRef<Path>>(path: P) -> ExifData {
-        let mut exif_data = ExifData::default();
+    /// 提取 EXIF 数据为部分填充的 ImageInfo
+    fn extract_exif_data<P: AsRef<Path>>(path: P) -> ImageInfo {
+        let mut info = ImageInfo {
+            width: 0, height: 0, format: String::new(), file_size: 0,
+            created_at: None, camera_make: None, camera_model: None,
+            lens_model: None, focal_length: None, aperture: None,
+            exposure_time: None, iso: None, flash: None, white_balance: None,
+        };
 
-        // 尝试读取 EXIF 数据
         if let Ok(file) = std::fs::File::open(path) {
             let mut buf_reader = std::io::BufReader::new(file);
             let exif_reader = exif::Reader::new();
             if let Ok(exif) = exif_reader.read_from_container(&mut buf_reader) {
-                exif_data = Self::parse_exif(&exif);
+                Self::parse_exif_into(&exif, &mut info);
             }
         }
 
-        exif_data
+        info
     }
     
     /// 快速获取图片尺寸，不完整解码图片
@@ -284,45 +274,38 @@ impl ImageCompressor {
             Ok((width, height)) => Ok((width, height, format)),
             Err(_) => {
                 // 最后回退到完整解码 (慢)
-                println!("Warning: Falling back to full image decode for dimensions");
+                log::warn!("Falling back to full image decode for dimensions");
                 let img = image::open(path)?;
                 Ok((img.width(), img.height(), format!("{:?}", img.color())))
             }
         }
     }
 
-    /// 解析 EXIF 数据
-    fn parse_exif(exif: &Exif) -> ExifData {
-        let mut data = ExifData::default();
-
+    /// 解析 EXIF 数据，填充到 ImageInfo 中
+    fn parse_exif_into(exif: &Exif, info: &mut ImageInfo) {
         // 拍摄时间
         if let Some(field) = exif.get_field(Tag::DateTime, In::PRIMARY) {
-            data.created_at = Self::parse_datetime(&field.display_value().to_string());
+            info.created_at = Self::parse_datetime(&field.display_value().to_string());
         } else if let Some(field) = exif.get_field(Tag::DateTimeOriginal, In::PRIMARY) {
-            data.created_at = Self::parse_datetime(&field.display_value().to_string());
+            info.created_at = Self::parse_datetime(&field.display_value().to_string());
         }
 
-        // 相机制造商
         if let Some(field) = exif.get_field(Tag::Make, In::PRIMARY) {
-            data.camera_make = Some(field.display_value().to_string());
+            info.camera_make = Some(field.display_value().to_string());
         }
-
-        // 相机型号
         if let Some(field) = exif.get_field(Tag::Model, In::PRIMARY) {
-            data.camera_model = Some(field.display_value().to_string());
+            info.camera_model = Some(field.display_value().to_string());
         }
-
-        // 镜头型号
         if let Some(field) = exif.get_field(Tag::LensModel, In::PRIMARY) {
-            data.lens_model = Some(field.display_value().to_string());
+            info.lens_model = Some(field.display_value().to_string());
         }
 
         // 焦距
         if let Some(field) = exif.get_field(Tag::FocalLength, In::PRIMARY) {
             if let Value::Rational(ref rationals) = field.value {
-                if !rationals.is_empty() {
+                if !rationals.is_empty() && rationals[0].denom != 0 {
                     let rational = &rationals[0];
-                    data.focal_length = Some(rational.num as f64 / rational.denom as f64);
+                    info.focal_length = Some(rational.num as f64 / rational.denom as f64);
                 }
             }
         }
@@ -330,38 +313,31 @@ impl ImageCompressor {
         // 光圈
         if let Some(field) = exif.get_field(Tag::FNumber, In::PRIMARY) {
             if let Value::Rational(ref rationals) = field.value {
-                if !rationals.is_empty() {
+                if !rationals.is_empty() && rationals[0].denom != 0 {
                     let rational = &rationals[0];
-                    data.aperture = Some(rational.num as f64 / rational.denom as f64);
+                    info.aperture = Some(rational.num as f64 / rational.denom as f64);
                 }
             }
         }
 
-        // 曝光时间
         if let Some(field) = exif.get_field(Tag::ExposureTime, In::PRIMARY) {
-            data.exposure_time = Some(field.display_value().to_string());
+            info.exposure_time = Some(field.display_value().to_string());
         }
 
-        // ISO
         if let Some(field) = exif.get_field(Tag::PhotographicSensitivity, In::PRIMARY) {
             if let Value::Short(ref values) = field.value {
                 if !values.is_empty() {
-                    data.iso = Some(values[0] as u32);
+                    info.iso = Some(values[0] as u32);
                 }
             }
         }
 
-        // 闪光灯
         if let Some(field) = exif.get_field(Tag::Flash, In::PRIMARY) {
-            data.flash = Some(field.display_value().to_string());
+            info.flash = Some(field.display_value().to_string());
         }
-
-        // 白平衡
         if let Some(field) = exif.get_field(Tag::WhiteBalance, In::PRIMARY) {
-            data.white_balance = Some(field.display_value().to_string());
+            info.white_balance = Some(field.display_value().to_string());
         }
-
-        data
     }
 
     /// 解析日期时间
@@ -378,7 +354,6 @@ impl ImageCompressor {
         let formats = [
             "%Y-%m-%d %H:%M:%S",
             "%Y/%m/%d %H:%M:%S",
-            "%Y:%m:%d %H:%M:%S",
         ];
 
         for format in &formats {
@@ -392,37 +367,6 @@ impl ImageCompressor {
 
 }
 
-#[derive(Debug, Default)]
-struct ExifData {
-    created_at: Option<DateTime<Utc>>,
-    camera_make: Option<String>,
-    camera_model: Option<String>,
-    lens_model: Option<String>,
-    focal_length: Option<f64>,
-    aperture: Option<f64>,
-    exposure_time: Option<String>,
-    iso: Option<u32>,
-    flash: Option<String>,
-    white_balance: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct ImageInfo {
-    pub width: u32,
-    pub height: u32,
-    pub format: String,
-    pub file_size: u64,
-    pub created_at: Option<DateTime<Utc>>,
-    pub camera_make: Option<String>,
-    pub camera_model: Option<String>,
-    pub lens_model: Option<String>,
-    pub focal_length: Option<f64>,
-    pub aperture: Option<f64>,
-    pub exposure_time: Option<String>,
-    pub iso: Option<u32>,
-    pub flash: Option<String>,
-    pub white_balance: Option<String>,
-}
 
 #[cfg(test)]
 mod tests {
@@ -463,12 +407,12 @@ mod tests {
         let thumbnail = CompressionConfig::thumbnail();
         assert_eq!(thumbnail.max_width, 300);
         assert_eq!(thumbnail.max_height, 300);
-        assert_eq!(thumbnail.quality, 100);
+        assert_eq!(thumbnail.quality, 75);
 
         let medium = CompressionConfig::medium();
         assert_eq!(medium.max_width, 800);
         assert_eq!(medium.max_height, 600);
-        assert_eq!(medium.quality, 100);
+        assert_eq!(medium.quality, 85);
     }
 
     #[test]
@@ -542,8 +486,10 @@ mod tests {
         
         assert!(photo.is_ok(), "生成多尺寸应该成功: {:?}", photo.as_ref().err());
         
-        let _photo = photo.unwrap();
-        
+        let photo = photo.unwrap();
+        assert!(!photo.src.is_empty(), "Photo src should not be empty");
+        assert!(!photo.detail.is_empty(), "Photo detail should not be empty");
+
         let detail_path = format!("{}/test_detail.jpg", output_dir);
         let medium_path = format!("{}/test_medium.jpg", output_dir);
         let thumbnail_path = format!("{}/test_thumbnail.jpg", output_dir);
