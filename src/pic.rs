@@ -10,8 +10,7 @@ use crate::models::{Photo, ImageInfo};
 
 #[derive(Debug, Clone)]
 pub struct CompressionConfig {
-    pub max_width: u32,
-    pub max_height: u32,
+    pub max_long_edge: u32,
     pub quality: u8,
     pub format: ImageFormat,
 }
@@ -20,8 +19,7 @@ impl CompressionConfig {
 
     pub fn detail() -> Self {
         Self {
-            max_width: 1920,
-            max_height: 1080,
+            max_long_edge: 1920,
             quality: 95,
             format: ImageFormat::Jpeg,
         }
@@ -29,8 +27,7 @@ impl CompressionConfig {
 
     pub fn medium() -> Self {
         Self {
-            max_width: 800,
-            max_height: 600,
+            max_long_edge: 1440,
             quality: 85,
             format: ImageFormat::Jpeg,
         }
@@ -38,8 +35,7 @@ impl CompressionConfig {
 
     pub fn thumbnail() -> Self {
         Self {
-            max_width: 300,
-            max_height: 300,
+            max_long_edge: 300,
             quality: 75,
             format: ImageFormat::Jpeg,
         }
@@ -69,8 +65,7 @@ impl ImageCompressor {
             let (new_width, new_height) = Self::calculate_new_dimensions(
                 img.width(),
                 img.height(),
-                config.max_width,
-                config.max_height,
+                config.max_long_edge,
             );
 
             let resized_img = if new_width != img.width() || new_height != img.height() {
@@ -161,17 +156,14 @@ impl ImageCompressor {
     fn calculate_new_dimensions(
         original_width: u32,
         original_height: u32,
-        max_width: u32,
-        max_height: u32,
+        max_long_edge: u32,
     ) -> (u32, u32) {
-        if original_width <= max_width && original_height <= max_height {
+        let long_edge = original_width.max(original_height);
+        if long_edge <= max_long_edge {
             return (original_width, original_height);
         }
 
-        let width_ratio = max_width as f32 / original_width as f32;
-        let height_ratio = max_height as f32 / original_height as f32;
-        let ratio = width_ratio.min(height_ratio);
-
+        let ratio = max_long_edge as f32 / long_edge as f32;
         let new_width = (original_width as f32 * ratio) as u32;
         let new_height = (original_height as f32 * ratio) as u32;
 
@@ -405,38 +397,38 @@ mod tests {
     #[test]
     fn test_compression_config_presets() {
         let thumbnail = CompressionConfig::thumbnail();
-        assert_eq!(thumbnail.max_width, 300);
-        assert_eq!(thumbnail.max_height, 300);
+        assert_eq!(thumbnail.max_long_edge, 300);
         assert_eq!(thumbnail.quality, 75);
 
         let medium = CompressionConfig::medium();
-        assert_eq!(medium.max_width, 800);
-        assert_eq!(medium.max_height, 600);
+        assert_eq!(medium.max_long_edge, 1440);
         assert_eq!(medium.quality, 85);
     }
 
     #[test]
     fn test_calculate_new_dimensions_no_resize_needed() {
-        let (w, h) = ImageCompressor::calculate_new_dimensions(800, 600, 1920, 1080);
+        let (w, h) = ImageCompressor::calculate_new_dimensions(800, 600, 1920);
         assert_eq!((w, h), (800, 600));
     }
 
     #[test]
-    fn test_calculate_new_dimensions_width_limited() {
-        let (w, h) = ImageCompressor::calculate_new_dimensions(2000, 1000, 1000, 1200);
+    fn test_calculate_new_dimensions_landscape() {
+        // 横图: 长边是宽度 2000，限制到 1000
+        let (w, h) = ImageCompressor::calculate_new_dimensions(2000, 1000, 1000);
         assert_eq!((w, h), (1000, 500));
     }
 
     #[test]
-    fn test_calculate_new_dimensions_height_limited() {
-        let (w, h) = ImageCompressor::calculate_new_dimensions(1000, 2000, 1200, 1000);
+    fn test_calculate_new_dimensions_portrait() {
+        // 竖图: 长边是高度 2000，限制到 1000
+        let (w, h) = ImageCompressor::calculate_new_dimensions(1000, 2000, 1000);
         assert_eq!((w, h), (500, 1000));
     }
 
     #[test]
-    fn test_calculate_new_dimensions_both_limited() {
-        let (w, h) = ImageCompressor::calculate_new_dimensions(1920, 1080, 960, 540);
-        assert_eq!((w, h), (960, 540));
+    fn test_calculate_new_dimensions_square() {
+        let (w, h) = ImageCompressor::calculate_new_dimensions(1920, 1920, 960);
+        assert_eq!((w, h), (960, 960));
     }
 
     #[tokio::test]

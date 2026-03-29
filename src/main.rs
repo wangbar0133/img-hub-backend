@@ -6,6 +6,7 @@ mod routes;
 
 #[macro_use] extern crate rocket;
 use log::info;
+use rocket::data::{Limits, ToByteUnit};
 use rocket::fs::FileServer;
 use rocket_cors::{AllowedOrigins, CorsOptions};
 use database::AlbumsDatabase;
@@ -43,9 +44,14 @@ async fn rocket() -> _ {
         .parse::<u16>()
         .unwrap_or(8000);
 
+    let limits = Limits::default()
+        .limit("file", 100.mebibytes())
+        .limit("data-form", u64::MAX.bytes());
+
     let figment = rocket::Config::figment()
         .merge(("address", host))
-        .merge(("port", port));
+        .merge(("port", port))
+        .merge(("limits", limits));
 
     let cors = CorsOptions {
         allowed_origins: AllowedOrigins::all(),
