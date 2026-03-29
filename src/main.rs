@@ -64,6 +64,7 @@ async fn rocket() -> _ {
             routes![
                 routes::albums::index,
                 routes::albums::get_albums,
+                routes::albums::get_all_albums_admin,
                 routes::albums::get_featured_albums,
                 routes::albums::get_album_by_id,
                 routes::albums::set_album_cover,

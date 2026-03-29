@@ -19,14 +19,23 @@ Returns a simple health check message.
 
 ---
 
-### 2. Get All Albums
+### 2. Get Visible Albums
 **GET** `/api/albums`
 
-Retrieves all photo albums from the database.
+Retrieves all visible (non-hidden) photo albums from the database.
 
 ---
 
-### 3. Get Featured Albums
+### 3. Get All Albums (Admin)
+**GET** `/api/admin/albums`
+
+Retrieves all albums including hidden ones. No authentication required currently (TODO).
+
+**Response:** Same as `GET /api/albums`.
+
+---
+
+### 4. Get Featured Albums
 **GET** `/api/featured-albums`
 
 Retrieves only albums marked as featured (featured = true).
@@ -86,7 +95,7 @@ Retrieves only albums marked as featured (featured = true).
 
 ---
 
-### 4. Get Album by ID
+### 5. Get Album by ID
 **GET** `/api/album/{id}`
 
 Retrieves a specific album by its ID.
@@ -124,7 +133,7 @@ Retrieves a specific album by its ID.
 
 ---
 
-### 5. Upload Images (Async)
+### 6. Upload Images (Async)
 **POST** `/api/upload`
 
 Uploads multiple images and creates compressed versions (thumbnail, detail, original) asynchronously. Returns immediately with a task ID for tracking progress.
@@ -168,7 +177,7 @@ Uploads multiple images and creates compressed versions (thumbnail, detail, orig
 
 ---
 
-### 6. Get Upload Status
+### 7. Get Upload Status
 **GET** `/api/upload-status/{task_id}`
 
 Retrieves the current status of an upload task.
@@ -216,7 +225,7 @@ Retrieves the current status of an upload task.
 
 ---
 
-### 7. Set Album Cover
+### 8. Set Album Cover
 **PUT** `/api/album/{album_id}/cover`
 
 Sets the cover image for a specific album.
@@ -257,7 +266,7 @@ Sets the cover image for a specific album.
 
 ---
 
-### 8. Delete Album
+### 9. Delete Album
 **DELETE** `/api/album/{album_id}`
 
 Deletes a specific album and all its associated photos from the database and file system.
@@ -293,7 +302,7 @@ Deletes a specific album and all its associated photos from the database and fil
 
 ---
 
-### 9. Static File Server
+### 10. Static File Server
 **GET** `/public/{album_id}/{filename}`
 
 Serves uploaded images and generated thumbnails. Files are organized by album ID.

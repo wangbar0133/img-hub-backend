@@ -5,8 +5,31 @@ use std::fs;
 use std::path::Path;
 
 use crate::database::AlbumsDatabase;
+use crate::models::Album;
 use crate::response::{AlbumsResponse, AlbumResponse, SetCoverResponse, DeleteAlbumResponse};
 use crate::AppConfig;
+
+async fn albums_response<F, Fut>(fetch: F) -> Json<AlbumsResponse>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = mongodb::error::Result<Vec<Album>>>,
+{
+    match fetch().await {
+        Ok(albums) => Json(AlbumsResponse {
+            success: true,
+            msg: None,
+            albums,
+        }),
+        Err(e) => {
+            error!("Failed to retrieve albums: {}", e);
+            Json(AlbumsResponse {
+                success: false,
+                msg: Some("Failed to retrieve albums".to_string()),
+                albums: vec![],
+            })
+        }
+    }
+}
 
 #[get("/")]
 pub fn index() -> &'static str {
@@ -16,34 +39,19 @@ pub fn index() -> &'static str {
 
 #[get("/api/albums")]
 pub async fn get_albums(db: &State<AlbumsDatabase>) -> Json<AlbumsResponse> {
-    match db.get_all_albums().await {
-        Ok(albums) => Json(AlbumsResponse {
-            success: true,
-            msg: None,
-            albums,
-        }),
-        Err(_) => Json(AlbumsResponse {
-            success: false,
-            msg: Some("Failed to retrieve albums".to_string()),
-            albums: vec![],
-        }),
-    }
+    albums_response(|| db.get_all_albums()).await
+}
+
+// TODO: add authentication guard for admin endpoints
+#[get("/api/admin/albums")]
+pub async fn get_all_albums_admin(db: &State<AlbumsDatabase>) -> Json<AlbumsResponse> {
+    info!("Admin get all albums endpoint accessed");
+    albums_response(|| db.get_all_albums_unfiltered()).await
 }
 
 #[get("/api/featured-albums")]
 pub async fn get_featured_albums(db: &State<AlbumsDatabase>) -> Json<AlbumsResponse> {
-    match db.get_featured_albums().await {
-        Ok(albums) => Json(AlbumsResponse {
-            success: true,
-            msg: None,
-            albums,
-        }),
-        Err(_) => Json(AlbumsResponse {
-            success: false,
-            msg: Some("Failed to retrieve albums".to_string()),
-            albums: vec![],
-        }),
-    }
+    albums_response(|| db.get_featured_albums()).await
 }
 
 #[get("/api/album/<id>")]
@@ -54,11 +62,14 @@ pub async fn get_album_by_id(db: &State<AlbumsDatabase>, id: String) -> Json<Alb
             msg: None,
             album,
         }),
-        Err(_) => Json(AlbumResponse {
-            success: false,
-            msg: Some("Failed to retrieve albums".to_string()),
-            album: None,
-        }),
+        Err(e) => {
+            error!("Failed to retrieve album {}: {}", id, e);
+            Json(AlbumResponse {
+                success: false,
+                msg: Some("Failed to retrieve album".to_string()),
+                album: None,
+            })
+        }
     }
 }
 

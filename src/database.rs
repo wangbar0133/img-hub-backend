@@ -27,105 +27,105 @@ impl AlbumsDatabase {
         Ok(db)
     }
 
+    fn albums_coll(&self) -> Collection<Album> {
+        self.client.database(&self.db_name).collection("albums")
+    }
+
+    fn tasks_coll(&self) -> Collection<UploadTask> {
+        self.client.database(&self.db_name).collection("upload_tasks")
+    }
+
     async fn ensure_indexes(&self) -> mongodb::error::Result<()> {
         // upload_tasks: TTL 索引，7天后自动清理
-        let coll: Collection<UploadTask> = self.client.database(&self.db_name).collection("upload_tasks");
         let ttl_index = IndexModel::builder()
             .keys(doc! { "created_at": 1 })
             .options(IndexOptions::builder().expire_after(std::time::Duration::from_secs(7 * 24 * 3600)).build())
             .build();
-        coll.create_index(ttl_index).await?;
+        self.tasks_coll().create_index(ttl_index).await?;
 
         // albums: 唯一索引
-        let albums_coll: Collection<Album> = self.client.database(&self.db_name).collection("albums");
         let id_index = IndexModel::builder()
             .keys(doc! { "id": 1 })
             .options(IndexOptions::builder().unique(true).build())
             .build();
-        albums_coll.create_index(id_index).await?;
+        self.albums_coll().create_index(id_index).await?;
 
         info!("Database indexes ensured");
         Ok(())
     }
 
     pub async fn add_new_album(&self, album: Album) -> mongodb::error::Result<()> {
-        let my_coll: Collection<Album> = self.client.database(&self.db_name).collection("albums");
-        let res = my_coll.insert_one(album).await?;
+        let res = self.albums_coll().insert_one(album).await?;
         info!("add_new_album with db id: {}", res.inserted_id);
         Ok(())
     }
 
     pub async fn get_album_by_id(&self, album_id: &str) -> mongodb::error::Result<Option<Album>> {
-        let my_coll: Collection<Album> = self.client.database(&self.db_name).collection("albums");
-        let filter = doc! { "id": album_id };
-        let res = my_coll.find_one(filter).await?;
+        let res = self.albums_coll().find_one(doc! { "id": album_id }).await?;
         info!("get_album_by_id completed");
         Ok(res)
     }
 
-    pub async fn get_all_albums(&self) -> mongodb::error::Result<Vec<Album>> {
-        let my_coll: Collection<Album> = self.client.database(&self.db_name).collection("albums");
-        let mut cursor = my_coll.find(doc! {"hidden": false}).await?;
+    async fn find_albums(&self, filter: mongodb::bson::Document) -> mongodb::error::Result<Vec<Album>> {
+        let mut cursor = self.albums_coll().find(filter).await?;
         let mut albums = Vec::new();
-        
         while cursor.advance().await? {
-            let album = cursor.deserialize_current()?;
-            albums.push(album);
+            albums.push(cursor.deserialize_current()?);
         }
-        
+        Ok(albums)
+    }
+
+    pub async fn get_all_albums_unfiltered(&self) -> mongodb::error::Result<Vec<Album>> {
+        let albums = self.find_albums(doc! {}).await?;
+        info!("get_all_albums_unfiltered completed, found {} albums", albums.len());
+        Ok(albums)
+    }
+
+    fn visible_filter() -> mongodb::bson::Document {
+        doc! { "hidden": { "$ne": true } }
+    }
+
+    pub async fn get_all_albums(&self) -> mongodb::error::Result<Vec<Album>> {
+        let albums = self.find_albums(Self::visible_filter()).await?;
         info!("get_all_albums completed, found {} albums", albums.len());
         Ok(albums)
     }
 
     pub async fn get_featured_albums(&self) -> mongodb::error::Result<Vec<Album>> {
-        let my_coll: Collection<Album> = self.client.database(&self.db_name).collection("albums");
-        let filter = doc! { "featured": true, "hidden": false };
-        let mut cursor = my_coll.find(filter).await?;
-        let mut albums = Vec::new();
-
-        while cursor.advance().await? {
-            let album = cursor.deserialize_current()?;
-            albums.push(album);
-        }
-
+        let mut filter = Self::visible_filter();
+        filter.insert("featured", true);
+        let albums = self.find_albums(filter).await?;
         info!("get_featured_albums completed, found {} albums", albums.len());
         Ok(albums)
     }
 
     pub async fn update_album(&self, album_id: &str, updated_album: Album) -> mongodb::error::Result<()> {
-        let my_coll: Collection<Album> = self.client.database(&self.db_name).collection("albums");
         let filter = doc! { "id": album_id };
         let update = doc! { "$set": mongodb::bson::to_bson(&updated_album)? };
-        let res = my_coll.update_one(filter, update).await?;
+        let res = self.albums_coll().update_one(filter, update).await?;
         info!("update_album completed, modified count: {}", res.modified_count);
         Ok(())
     }
 
     pub async fn delete_album(&self, album_id: &str) -> mongodb::error::Result<bool> {
-        let my_coll: Collection<Album> = self.client.database(&self.db_name).collection("albums");
-        let filter = doc! { "id": album_id };
-        let res = my_coll.delete_one(filter).await?;
+        let res = self.albums_coll().delete_one(doc! { "id": album_id }).await?;
         info!("delete_album completed, deleted count: {}", res.deleted_count);
         Ok(res.deleted_count > 0)
     }
 
     // 任务状态管理方法
     pub async fn create_upload_task(&self, task: UploadTask) -> mongodb::error::Result<()> {
-        let my_coll: Collection<UploadTask> = self.client.database(&self.db_name).collection("upload_tasks");
-        let res = my_coll.insert_one(task).await?;
+        let res = self.tasks_coll().insert_one(task).await?;
         info!("create_upload_task with db id: {}", res.inserted_id);
         Ok(())
     }
 
     pub async fn get_upload_task(&self, task_id: &str) -> mongodb::error::Result<Option<UploadTask>> {
-        let my_coll: Collection<UploadTask> = self.client.database(&self.db_name).collection("upload_tasks");
-        let filter = doc! { "task_id": task_id };
-        let res = my_coll.find_one(filter).await?;
+        let res = self.tasks_coll().find_one(doc! { "task_id": task_id }).await?;
         Ok(res)
     }
 
     pub async fn finalize_upload_task(&self, task_id: &str, status: &str, error_message: Option<String>) -> mongodb::error::Result<()> {
-        let my_coll: Collection<UploadTask> = self.client.database(&self.db_name).collection("upload_tasks");
         let filter = doc! { "task_id": task_id };
         let mut set_doc = doc! {
             "status": status,
@@ -134,17 +134,16 @@ impl AlbumsDatabase {
         if let Some(msg) = error_message {
             set_doc.insert("error_message", msg);
         }
-        my_coll.update_one(filter, doc! { "$set": set_doc }).await?;
+        self.tasks_coll().update_one(filter, doc! { "$set": set_doc }).await?;
         info!("finalize_upload_task completed for task: {}", task_id);
         Ok(())
     }
 
     pub async fn increment_task_progress(&self, task_id: &str, success: bool) -> mongodb::error::Result<()> {
-        let my_coll: Collection<UploadTask> = self.client.database(&self.db_name).collection("upload_tasks");
         let filter = doc! { "task_id": task_id };
         let field = if success { "processed_files" } else { "failed_files" };
         let update = doc! { "$inc": { field: 1_i64 } };
-        my_coll.update_one(filter, update).await?;
+        self.tasks_coll().update_one(filter, update).await?;
         Ok(())
     }
 
